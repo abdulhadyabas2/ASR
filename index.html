@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8" />
@@ -19,12 +20,7 @@
         بەخێربێیت <span id="userNameDisplay"></span> | <span id="coinDisplay"></span>
       </div>
       <div class="flex items-center space-x-4">
-        <button id="chargeBtn" class="text-gray-600 dark:text-gray-300 hover:text-green-500 transition" title="چونەدەرەوە">چونەدەرەوە</button>
-        <button id="logoutBtn" class="flex items-center text-gray-600 dark:text-gray-300 hover:text-red-500 transition" title="چونەدەرەوە">
-          <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7" />
-          </svg>
-        </button>
+        <button id="chargeBtn" class="text-gray-600 dark:text-gray-300 hover:text-green-500 transition" title="شارژ کردن">شارژ کردن</button>
       </div>
     </div>
   </nav>
@@ -77,12 +73,9 @@
     <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
       <div id="toolbar"></div>
       <div class="flex space-x-4">
-        <button id="exportWordBtn" class="focus:outline-none hover:opacity-80 transition" title="هەڵگرتنی وۆرد">...
-        </button>
-        <button id="copyBtn" class="focus:outline-none hover:opacity-80 transition" title="کۆپی کردن">...
-        </button>
-        <button id="clearBtn" class="focus:outline-none hover:opacity-80 transition" title="پاک کردن">...
-        </button>
+        <button id="exportWordBtn" class="focus:outline-none hover:opacity-80 transition" title="هەڵگرتنی وۆرد">...</button>
+        <button id="copyBtn" class="focus:outline-none hover:opacity-80 transition" title="کۆپی کردن">...</button>
+        <button id="clearBtn" class="focus:outline-none hover:opacity-80 transition" title="پاک کردن">...</button>
       </div>
     </div>
     <!-- Quill Editor -->
@@ -99,15 +92,8 @@
     let usersDB = JSON.parse(localStorage.getItem('users') || '[]');
     function saveUsers() { localStorage.setItem('users', JSON.stringify(usersDB)); }
     const currentUserObj = usersDB.find(x => x.user === currentUser);
-    if (!currentUserObj) window.location.href = 'login.html';
     document.getElementById('userNameDisplay').textContent = currentUser;
     document.getElementById('coinDisplay').textContent = `: ${currentUserObj.coins}`;
-
-    // Logout
-    document.getElementById('logoutBtn').addEventListener('click', () => {
-      localStorage.removeItem('currentUser');
-      window.location.href = 'login.html';
-    });
 
     // Charge Wallet (1 Dinar = 10 coins)
     document.getElementById('chargeBtn').addEventListener('click', () => {
@@ -157,7 +143,7 @@
     document.getElementById('pauseBtn').addEventListener('click', () => vadInstance && vadInstance.pause());
     document.getElementById('deleteBtn').addEventListener('click', () => { vadInstance && vadInstance.reset(); quill.setText(''); });
 
-    // Export, Copy, Clear (unchanged)
+    // Export, Copy, Clear
     document.getElementById('exportWordBtn').addEventListener('click', () => {
       const header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'></head><body>";
       const footer = '</body></html>';
