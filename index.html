@@ -17,104 +17,180 @@
   </div>
 
   <script>
-    const chat = document.getElementById('chat');
-    const textInput = document.getElementById('textInput');
-    const sendBtn = document.getElementById('sendBtn');
+  const chat = document.getElementById('chat');
+  const textInput = document.getElementById('textInput');
+  const sendBtn = document.getElementById('sendBtn');
 
-    sendBtn.addEventListener('click', sendMessage);
-    textInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
+  // iOS audio unlock via a tiny muted play on first gesture
+  let audioUnlocked = false;
+  function unlockAudio() {
+    if (audioUnlocked) return;
+    try {
+      const a = new Audio();
+      a.muted = true; a.playsInline = true;
+      // a.play() will resolve instantly (silent), “unlocking” future plays
+      a.play().catch(()=>{});
+    } finally { audioUnlocked = true; }
+  }
 
-    async function sendMessage() {
-      const text = textInput.value.trim();
-      if (!text) return;
-      appendMessage('user', text);
-      textInput.value = '';
-      try {
-        // Request MP3 for better iOS support
-        const response = await fetch('https://tts.bla.iq/text-to-speech-krmanji', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          body: JSON.stringify({ sentences: text, format: 'mp3' })
-        });
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+  sendBtn.addEventListener('click', () => { unlockAudio(); sendMessage(); });
+  textInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') { unlockAudio(); sendMessage(); }
+  });
 
-        const contentType = response.headers.get('content-type') || '';
-        let audioUrl;
+  async function sendMessage() {
+    const text = textInput.value.trim();
+    if (!text) return;
+    appendMessage('user', text);
+    textInput.value = '';
 
-        if (contentType.includes('audio/mpeg')) {
-          // MP3 blob
-          const blob = await response.blob();
-          audioUrl = URL.createObjectURL(blob);
-        } else if (contentType.includes('application/json')) {
-          // Handle various JSON shapes
-          const data = await response.json();
-          if (typeof data === 'string') {
-            // Plain URL string
-            audioUrl = data;
-          } else if (data.audio_url) {
-            audioUrl = data.audio_url;
-          } else if (data.url) {
-            audioUrl = data.url;
-          } else if (data.audioContent || data.audio_content || data.audio) {
-            const b64 = data.audioContent || data.audio_content || data.audio;
-            audioUrl = 'data:audio/mpeg;base64,' + b64;
-          } else {
-            console.error('Unexpected JSON response:', data);
-            appendMessage('bot', `Unexpected response: ${JSON.stringify(data)}`);
-            return;
-          }
+    // Create the audio bubble immediately inside the gesture
+    const audioBubble = makeAudioBubble('bot');
+    const audioEl = audioBubble.audio;
+    chat.appendChild(audioBubble.container);
+    chat.scrollTop = chat.scrollHeight;
+
+    // Start a muted play to keep iOS “unlocked”
+    audioEl.muted = true;
+    audioEl.autoplay = true;
+    audioEl.playsInline = true;
+    try { await audioEl.play(); } catch {}
+
+    try {
+      const response = await fetch('https://tts.bla.iq/text-to-speech-krmanji', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, audio/mpeg, audio/mp3, audio/*'
+        },
+        body: JSON.stringify({ sentences: text, format: 'mp3' }),
+        // mode: 'cors', // usually default; server must send proper CORS headers
+      });
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const ct = (response.headers.get('content-type') || '').toLowerCase();
+      let audioUrl = null;
+
+      if (ct.includes('audio/')) {
+        // Force a playable mp3 blob even if server says octet-stream
+        const buf = await response.arrayBuffer();
+        const blob = new Blob([buf], { type: 'audio/mpeg' });
+        audioUrl = URL.createObjectURL(blob);
+      } else if (ct.includes('application/json')) {
+        const data = await response.json();
+        if (typeof data === 'string') {
+          audioUrl = data;
+        } else if (data.audio_url || data.url) {
+          audioUrl = data.audio_url || data.url;
+        } else if (data.audioContent || data.audio_content || data.audio) {
+          const b64 = data.audioContent || data.audio_content || data.audio;
+          audioUrl = 'data:audio/mpeg;base64,' + b64;
         } else {
-          throw new Error('Unsupported audio format: ' + contentType);
+          throw new Error('Unexpected JSON payload from TTS server.');
         }
-
-        appendAudio('bot', audioUrl);
-      } catch (err) {
-        console.error(err);
-        appendMessage('bot', `Error: ${err.message}`);
+      } else {
+        // Some servers return application/octet-stream for mp3
+        const buf = await response.arrayBuffer();
+        const blob = new Blob([buf], { type: 'audio/mpeg' });
+        audioUrl = URL.createObjectURL(blob);
       }
+
+      // Load the real audio, then unmute and play
+      await setAudioAndPlay(audioEl, audioUrl);
+    } catch (err) {
+      console.error(err);
+      // Show a retry / tap-to-play fallback
+      showErrorWithRetry(audioBubble.container, `Error: ${err.message}`);
+    } finally {
       chat.scrollTop = chat.scrollHeight;
     }
+  }
 
-    function appendMessage(sender, message) {
-      const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const msgDiv = document.createElement('div');
-      msgDiv.className = sender === 'user' ? 'text-right' : 'text-left';
-      msgDiv.innerHTML = `
-        <div class="inline-block">
-          <span class="${sender==='user'?'bg-blue-500 text-white':'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200'} inline-block px-4 py-2 rounded-lg max-w-xs break-words">${message}</span>
-          <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">${time}</div>
-        </div>
-      `;
-      chat.appendChild(msgDiv);
-    }
+  function appendMessage(sender, message) {
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const msgDiv = document.createElement('div');
+    msgDiv.className = sender === 'user' ? 'text-right' : 'text-left';
+    msgDiv.innerHTML = `
+      <div class="inline-block">
+        <span class="${sender==='user'?'bg-blue-600 text-white':'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200'} inline-block px-4 py-2 rounded-lg max-w-xs break-words">${message}</span>
+        <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">${time}</div>
+      </div>`;
+    chat.appendChild(msgDiv);
+  }
 
-    function appendAudio(sender, audioUrl) {
-      const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const msgDiv = document.createElement('div');
-      msgDiv.className = sender === 'user' ? 'text-right' : 'text-left';
-      const container = document.createElement('div');
-      container.className = 'inline-block';
+  function makeAudioBubble(sender) {
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const wrapper = document.createElement('div');
+    wrapper.className = sender === 'user' ? 'text-right' : 'text-left';
 
-      // Create audio element with inline playback attributes for iOS
-      const audioEl = document.createElement('audio');
-      audioEl.controls = true;
-      audioEl.playsInline = true;
-      audioEl.setAttribute('playsinline', '');
-      audioEl.setAttribute('webkit-playsinline', '');
-      audioEl.src = audioUrl;
-      container.appendChild(audioEl);
+    const container = document.createElement('div');
+    container.className = 'inline-block';
 
-      const ts = document.createElement('div');
-      ts.className = 'text-xs text-gray-500 dark:text-gray-400 mt-1';
-      ts.textContent = time;
-      container.appendChild(ts);
+    const audioEl = document.createElement('audio');
+    audioEl.controls = true;
+    audioEl.preload = 'auto';
+    audioEl.playsInline = true;
+    audioEl.setAttribute('playsinline', '');
+    audioEl.setAttribute('webkit-playsinline', '');
+    container.appendChild(audioEl);
 
-      msgDiv.appendChild(container);
-      chat.appendChild(msgDiv);
-    }
-  </script>
+    const ts = document.createElement('div');
+    ts.className = 'text-xs text-gray-500 dark:text-gray-400 mt-1';
+    ts.textContent = time;
+
+    container.appendChild(ts);
+    wrapper.appendChild(container);
+
+    return { container: wrapper, audio: audioEl };
+  }
+
+  async function setAudioAndPlay(audioEl, src) {
+    return new Promise((resolve) => {
+      const onCanPlay = async () => {
+        audioEl.removeEventListener('canplay', onCanPlay);
+        try {
+          audioEl.muted = false;
+          await audioEl.play();
+          resolve();
+        } catch {
+          // Autoplay still blocked → show tap-to-play helper
+          showTapToPlay(audioEl);
+          resolve();
+        }
+      };
+      audioEl.addEventListener('canplay', onCanPlay, { once: true });
+      audioEl.src = src;
+      audioEl.load();
+    });
+  }
+
+  function showTapToPlay(audioEl) {
+    const btn = document.createElement('button');
+    btn.className = 'mt-2 px-3 py-1 text-sm rounded-full bg-emerald-600 text-white hover:bg-emerald-700';
+    btn.textContent = 'Tap to play';
+    btn.onclick = async () => {
+      try { await audioEl.play(); btn.remove(); } catch {}
+    };
+    audioEl.parentElement.appendChild(btn);
+  }
+
+  function showErrorWithRetry(container, msg) {
+    const box = document.createElement('div');
+    box.className = 'mt-2 text-xs text-red-600 dark:text-red-400';
+    box.textContent = msg;
+
+    const retry = document.createElement('button');
+    retry.className = 'ml-2 px-2 py-1 text-xs rounded bg-gray-800 text-white dark:bg-gray-200 dark:text-gray-900';
+    retry.textContent = 'Retry';
+    retry.onclick = () => {
+      box.remove(); retry.remove();
+      sendBtn.click();
+    };
+    container.appendChild(box);
+    container.appendChild(retry);
+  }
+</script>
+
 </body>
 </html>
